@@ -22,10 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-        with:
-          repository: dexwritescode/aktor
-          path: ${{ github.workspace }}/../aktor
+      - name: Checkout aktor sibling
+        run: git clone https://github.com/dexwritescode/aktor.git "${{ github.workspace }}/../aktor"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
