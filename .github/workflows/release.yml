@@ -1,0 +1,24 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dexwritescode/release-on-merge-action@v1.2.0
+        with:
+          initial-version: 0.1.0
+          version-increment-strategy: patch
+          generate-release-notes: true
+          labels: |
+            release:major
+            release:minor
+            release:patch
+            release:skip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

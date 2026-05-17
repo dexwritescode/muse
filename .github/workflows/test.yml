@@ -1,0 +1,32 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout aktor sibling
+        run: git clone https://github.com/dexwritescode/aktor.git "${{ github.workspace }}/../aktor"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --locked
