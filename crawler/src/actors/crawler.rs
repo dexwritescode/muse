@@ -107,10 +107,10 @@ impl CrawlerActor {
         if let Some(body) = document.select(&body_selector).next() {
             // Get all text, filtering out script/style content
             for node in body.descendants() {
-                if let Some(element) = node.value().as_element() {
-                    if element.name() == "script" || element.name() == "style" {
-                        continue;
-                    }
+                if let Some(element) = node.value().as_element()
+                    && (element.name() == "script" || element.name() == "style")
+                {
+                    continue;
                 }
 
                 if let Some(text) = node.value().as_text() {

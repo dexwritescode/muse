@@ -2,7 +2,7 @@ use aktor::{Actor, ActorContext, ActorError, ActorRef};
 use std::collections::{HashSet, VecDeque};
 use tracing::{info, debug};
 
-use crate::messages::{CrawlerMessage, CrawlUrl, PageResult, GetFrontierStatus, FrontierStatus};
+use crate::messages::{CrawlerMessage, CrawlUrl, PageResult, FrontierStatus};
 
 /// URLFrontierActor manages the queue of URLs to crawl
 /// It handles deduplication and maintains crawl statistics
@@ -55,18 +55,16 @@ impl URLFrontierActor {
             return;
         }
         // Send next URL to a crawler if available
-        if let Some(crawl_url) = self.queue.pop_front() {
-            if !self.crawler_refs.is_empty() {
-                // Round-robin distribution to crawlers
-                let crawler = &self.crawler_refs[self.current_crawler];
-                self.current_crawler = (self.current_crawler + 1) % self.crawler_refs.len();
+        if let Some(crawl_url) = self.queue.pop_front() && !self.crawler_refs.is_empty() {
+            // Round-robin distribution to crawlers
+            let crawler = &self.crawler_refs[self.current_crawler];
+            self.current_crawler = (self.current_crawler + 1) % self.crawler_refs.len();
 
-                debug!("Sending URL to crawler: {} (depth: {})", crawl_url.url, crawl_url.depth);
+            debug!("Sending URL to crawler: {} (depth: {})", crawl_url.url, crawl_url.depth);
 
-                // TODO: How does the crawler knows where to send the response to?
-                if let Err(e) = crawler.tell(CrawlerMessage::CrawlUrl(crawl_url), None) {
-                    tracing::error!("Failed to send URL to crawler: {}", e);
-                }
+            // TODO: How does the crawler knows where to send the response to?
+            if let Err(e) = crawler.tell(CrawlerMessage::CrawlUrl(crawl_url), None) {
+                tracing::error!("Failed to send URL to crawler: {}", e);
             }
         }
     }

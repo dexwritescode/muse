@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create crawler actors as children of the system
     let crawler1 = system.actor_of::<CrawlerActor>("crawler-1").await?;
-    let crawler2 = system.actor_of::<CrawlerActor>("crawler-2").await?;
+    let _crawler2 = system.actor_of::<CrawlerActor>("crawler-2").await?;
     println!("✓ Created {} crawler actors", 2);
 
     // Send some URLs to crawl
