@@ -1,6 +1,6 @@
-use aktor::{ActorSystem, ActorSystemConfig, Extension};
 use aktor::extensions::HttpClientExtension;
-use crawler::{CrawlerActor, CrawlerMessage, CrawlUrl};
+use aktor::{ActorSystem, ActorSystemConfig, Extension};
+use crawler::{CrawlUrl, CrawlerActor, CrawlerMessage};
 use std::sync::Arc;
 
 #[tokio::main]

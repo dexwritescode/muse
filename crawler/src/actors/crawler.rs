@@ -5,13 +5,13 @@
 //! - Synchronous message handling
 //! - Extracts links and text content for indexing
 
-use aktor::{Actor, ActorContext};
 use aktor::extensions::HttpClientExtension;
+use aktor::{Actor, ActorContext};
 use scraper::{Html, Selector};
-use tracing::{info, error, debug, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 
-use crate::messages::{CrawlerMessage, CrawlUrl, PageResult};
+use crate::messages::{CrawlUrl, CrawlerMessage, PageResult};
 
 /// CrawlerActor processes URLs and extracts content
 ///
@@ -164,8 +164,12 @@ impl CrawlerActor {
         let links = self.extract_links(&html, &url);
         let text = self.extract_text(&html);
 
-        debug!("Extracted {} links and {} chars of text from {}",
-               links.len(), text.len(), url);
+        debug!(
+            "Extracted {} links and {} chars of text from {}",
+            links.len(),
+            text.len(),
+            url
+        );
 
         // Create result
         let result = PageResult {

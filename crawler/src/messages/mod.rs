@@ -19,7 +19,7 @@ pub struct PageResult {
     pub url: String,
     pub title: String,
     pub links: Vec<String>,
-    pub text: String,  // Full text content for indexing
+    pub text: String, // Full text content for indexing
     pub depth: u32,
 }
 

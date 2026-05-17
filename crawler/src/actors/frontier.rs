@@ -1,8 +1,8 @@
 use aktor::{Actor, ActorContext, ActorError, ActorRef};
 use std::collections::{HashSet, VecDeque};
-use tracing::{info, debug};
+use tracing::{debug, info};
 
-use crate::messages::{CrawlerMessage, CrawlUrl, PageResult, FrontierStatus};
+use crate::messages::{CrawlUrl, CrawlerMessage, FrontierStatus, PageResult};
 
 /// URLFrontierActor manages the queue of URLs to crawl
 /// It handles deduplication and maintains crawl statistics
@@ -55,12 +55,17 @@ impl URLFrontierActor {
             return;
         }
         // Send next URL to a crawler if available
-        if let Some(crawl_url) = self.queue.pop_front() && !self.crawler_refs.is_empty() {
+        if let Some(crawl_url) = self.queue.pop_front()
+            && !self.crawler_refs.is_empty()
+        {
             // Round-robin distribution to crawlers
             let crawler = &self.crawler_refs[self.current_crawler];
             self.current_crawler = (self.current_crawler + 1) % self.crawler_refs.len();
 
-            debug!("Sending URL to crawler: {} (depth: {})", crawl_url.url, crawl_url.depth);
+            debug!(
+                "Sending URL to crawler: {} (depth: {})",
+                crawl_url.url, crawl_url.depth
+            );
 
             // TODO: How does the crawler knows where to send the response to?
             if let Err(e) = crawler.tell(CrawlerMessage::CrawlUrl(crawl_url), None) {
@@ -74,8 +79,12 @@ impl URLFrontierActor {
 
         info!(
             "Crawled: {} (depth: {}) - Found {} links, {} chars text - Progress: {}/{}",
-            result.url, result.depth, result.links.len(), result.text.len(),
-            self.crawled_count, self.max_urls
+            result.url,
+            result.depth,
+            result.links.len(),
+            result.text.len(),
+            self.crawled_count,
+            self.max_urls
         );
 
         // Add new URLs to queue if we haven't exceeded depth limit
@@ -117,7 +126,9 @@ impl URLFrontierActor {
         if ctx.is_ask_request() {
             let ctx_clone = ctx.clone();
             tokio::spawn(async move {
-                let _ = ctx_clone.respond(CrawlerMessage::FrontierStatus(status)).await;
+                let _ = ctx_clone
+                    .respond(CrawlerMessage::FrontierStatus(status))
+                    .await;
             });
         }
     }
@@ -146,13 +157,18 @@ impl Actor<CrawlerMessage> for URLFrontierActor {
     }
 
     fn pre_start(&mut self, _ctx: &ActorContext<CrawlerMessage>) -> Result<(), ActorError> {
-        info!("URLFrontierActor started (max_depth: {}, max_urls: {})",
-              self.max_depth, self.max_urls);
+        info!(
+            "URLFrontierActor started (max_depth: {}, max_urls: {})",
+            self.max_depth, self.max_urls
+        );
         Ok(())
     }
 
     fn post_stop(&mut self, _ctx: &ActorContext<CrawlerMessage>) -> Result<(), ActorError> {
-        info!("URLFrontierActor stopped - Crawled {} URLs", self.crawled_count);
+        info!(
+            "URLFrontierActor stopped - Crawled {} URLs",
+            self.crawled_count
+        );
         Ok(())
     }
 }
