@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = ActorSystemConfig::default();
     let system: Arc<ActorSystem> = ActorSystem::new(config).await?;
 
-    let frontier = system.actor_of::<URLFrontierActor>("frontier").await?;
+    let frontier = system.actor_of::<URLFrontierActor>("frontier")?;
     println!("✓ Spawned URLFrontierActor (crawlers initialised in pre_start)");
 
     let seed = CrawlUrl {

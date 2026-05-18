@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 aktor = { path = "../../aktor" }
-async-trait = "0.1"
 tokio = { version = "1.0", features = ["full"] }
 reqwest = { version = "0.12", features = ["json"] }
 scraper = "0.24"
