@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use aktor::{Actor, ActorContext, ActorError, ActorRef};
+use async_trait::async_trait;
 use std::collections::{HashSet, VecDeque};
 use tracing::{debug, info};
 
+use super::crawler::CrawlerActor;
 use crate::messages::{CrawlUrl, CrawlerMessage, FrontierStatus, PageResult};
 
 /// URLFrontierActor manages the queue of URLs to crawl
@@ -36,17 +40,20 @@ impl URLFrontierActor {
             current_crawler: 0,
         }
     }
+}
 
+impl Default for URLFrontierActor {
+    fn default() -> Self {
+        Self::new(3, 100)
+    }
+}
+
+impl URLFrontierActor {
     pub fn add_seed_url(&mut self, url: String) {
         if self.seen.insert(url.clone()) {
             self.queue.push_back(CrawlUrl { url, depth: 0 });
             info!("Added seed URL to frontier");
         }
-    }
-
-    pub fn register_crawler(&mut self, crawler: ActorRef<CrawlerMessage>) {
-        self.crawler_refs.push(crawler);
-        info!("Registered crawler actor");
     }
 
     fn handle_crawl_request(&mut self) {
@@ -134,7 +141,10 @@ impl URLFrontierActor {
     }
 }
 
-impl Actor<CrawlerMessage> for URLFrontierActor {
+#[async_trait]
+impl Actor for URLFrontierActor {
+    type Msg = CrawlerMessage;
+
     fn handle(&mut self, msg: CrawlerMessage, ctx: &ActorContext<CrawlerMessage>) {
         match msg {
             CrawlerMessage::CrawlUrl(crawl_url) => {
@@ -156,11 +166,21 @@ impl Actor<CrawlerMessage> for URLFrontierActor {
         }
     }
 
-    fn pre_start(&mut self, _ctx: &ActorContext<CrawlerMessage>) -> Result<(), ActorError> {
+    async fn pre_start(&mut self, ctx: &ActorContext<CrawlerMessage>) -> Result<(), ActorError> {
         info!(
             "URLFrontierActor started (max_depth: {}, max_urls: {})",
             self.max_depth, self.max_urls
         );
+        let frontier_ref = ctx.actor_ref().clone();
+        let client = Arc::new(reqwest::Client::new());
+        for i in 1..=2 {
+            let crawler = CrawlerActor::new(frontier_ref.clone(), client.clone());
+            let crawler_ref = ctx
+                .spawn_child(&format!("crawler-{}", i), crawler, None)
+                .await?;
+            self.crawler_refs.push(crawler_ref);
+            info!("Spawned crawler-{} as child", i);
+        }
         Ok(())
     }
 
