@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use aktor::{Actor, ActorContext, ActorError, ActorRef};
-use async_trait::async_trait;
 use std::collections::{HashSet, VecDeque};
 use tracing::{debug, info};
 
@@ -141,7 +140,6 @@ impl URLFrontierActor {
     }
 }
 
-#[async_trait]
 impl Actor for URLFrontierActor {
     type Msg = CrawlerMessage;
 
@@ -166,7 +164,7 @@ impl Actor for URLFrontierActor {
         }
     }
 
-    async fn pre_start(&mut self, ctx: &ActorContext<CrawlerMessage>) -> Result<(), ActorError> {
+    fn pre_start(&mut self, ctx: &ActorContext<CrawlerMessage>) -> Result<(), ActorError> {
         info!(
             "URLFrontierActor started (max_depth: {}, max_urls: {})",
             self.max_depth, self.max_urls
@@ -175,9 +173,7 @@ impl Actor for URLFrontierActor {
         let client = Arc::new(reqwest::Client::new());
         for i in 1..=2 {
             let crawler = CrawlerActor::new(frontier_ref.clone(), client.clone());
-            let crawler_ref = ctx
-                .spawn_child(&format!("crawler-{}", i), crawler, None)
-                .await?;
+            let crawler_ref = ctx.spawn_child(&format!("crawler-{}", i), crawler, None)?;
             self.crawler_refs.push(crawler_ref);
             info!("Spawned crawler-{} as child", i);
         }
