@@ -1,3 +1,4 @@
+use aktor::extensions::AsyncHttpClientExtension;
 use aktor::{ActorSystem, ActorSystemConfig};
 use crawler::{CrawlUrl, CrawlerMessage, URLFrontierActor};
 use std::sync::Arc;
@@ -10,6 +11,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = ActorSystemConfig::default();
     let system: Arc<ActorSystem> = ActorSystem::new(config).await?;
+
+    system.register_extension(AsyncHttpClientExtension::with_user_agent(
+        "muse-crawler/0.1.0",
+    ));
 
     let frontier = system.actor_of::<URLFrontierActor>("frontier")?;
     println!("✓ Spawned URLFrontierActor (crawlers initialised in pre_start)");
