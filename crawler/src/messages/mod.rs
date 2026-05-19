@@ -59,6 +59,12 @@ pub enum CrawlerMessage {
     PageResult(PageResult),
     GetFrontierStatus(GetFrontierStatus),
     FrontierStatus(FrontierStatus),
+    /// Carries fetched robots.txt body (None = unreachable/404, allow all)
+    RobotsReady(Option<String>),
+    /// Scheduled by DomainActor after crawl-delay elapses
+    Tick,
+    /// Sent by DomainActor to Frontier when it self-terminates (idle)
+    DomainStopped(String),
 }
 
 impl Message for CrawlerMessage {

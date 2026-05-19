@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use aktor::extensions::AsyncHttpClientExtension;
 use aktor::{Actor, ActorContext, ActorRef};
 use scraper::{Html, Selector};
 use tracing::{debug, error, info};
@@ -7,19 +6,14 @@ use url::Url;
 
 use crate::messages::{CrawlUrl, CrawlerMessage, PageResult};
 
-/// Fetches and parses a single URL, then reports PageResult to the frontier.
-/// Holds a direct ref to the frontier so results can be returned regardless
-/// of message-type differences between parent and child (see ctx.parent_address()).
-/// Shares the frontier's reqwest::Client for connection pooling.
 #[derive(Debug)]
 pub struct CrawlerActor {
-    frontier: ActorRef<CrawlerMessage>,
-    client: Arc<reqwest::Client>,
+    reply_to: ActorRef<CrawlerMessage>,
 }
 
 impl CrawlerActor {
-    pub fn new(frontier: ActorRef<CrawlerMessage>, client: Arc<reqwest::Client>) -> Self {
-        Self { frontier, client }
+    pub fn new(reply_to: ActorRef<CrawlerMessage>) -> Self {
+        Self { reply_to }
     }
 }
 
@@ -96,8 +90,11 @@ impl Actor for CrawlerActor {
         match msg {
             CrawlerMessage::CrawlUrl(CrawlUrl { url, depth }) => {
                 info!("Fetching: {} (depth: {})", url, depth);
-                let client = self.client.clone();
-                ctx.pipe_to_self(async move {
+                let client = ctx
+                    .system()
+                    .extension::<AsyncHttpClientExtension>()
+                    .client();
+                ctx.pipe_to_self::<_, String>(async move {
                     let response = client.get(&url).send().await.map_err(|e| e.to_string())?;
                     if !response.status().is_success() {
                         return Err(format!("HTTP {} for {}", response.status(), url));
@@ -122,8 +119,8 @@ impl Actor for CrawlerActor {
                 });
             }
             CrawlerMessage::PageResult(result) => {
-                if let Err(e) = self.frontier.tell(CrawlerMessage::PageResult(result), None) {
-                    error!("Failed to send PageResult to frontier: {}", e);
+                if let Err(e) = self.reply_to.tell(CrawlerMessage::PageResult(result), None) {
+                    error!("Failed to send PageResult to reply_to: {}", e);
                 }
                 ctx.stop_self();
             }

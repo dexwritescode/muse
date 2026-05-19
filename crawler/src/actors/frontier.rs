@@ -1,90 +1,77 @@
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::Duration;
 
 use aktor::{Actor, ActorContext, ActorError, ActorRef};
-use std::collections::{HashSet, VecDeque};
 use tracing::{debug, info};
 
-use super::crawler::CrawlerActor;
+use super::domain::{DomainActor, extract_domain};
 use crate::messages::{CrawlUrl, CrawlerMessage, FrontierStatus, PageResult};
 
-/// URLFrontierActor manages the queue of URLs to crawl
-/// It handles deduplication and maintains crawl statistics
 #[derive(Debug)]
 pub struct URLFrontierActor {
-    /// Queue of URLs waiting to be crawled
     queue: VecDeque<CrawlUrl>,
-    /// Set of URLs we've already seen (for deduplication)
     seen: HashSet<String>,
-    /// Count of URLs we've crawled
     crawled_count: usize,
-    /// Maximum crawl depth
     max_depth: u32,
-    /// Maximum URLs to crawl (safety limit)
     max_urls: usize,
-    /// Reference to crawler actor(s)
-    crawler_refs: Vec<ActorRef<CrawlerMessage>>,
-    /// Current crawler index for round-robin distribution
-    current_crawler: usize,
+    default_delay: Duration,
+    domains: HashMap<String, ActorRef<CrawlerMessage>>,
 }
 
 impl URLFrontierActor {
-    pub fn new(max_depth: u32, max_urls: usize) -> Self {
+    pub fn new(max_depth: u32, max_urls: usize, default_delay: Duration) -> Self {
         Self {
             queue: VecDeque::new(),
             seen: HashSet::new(),
             crawled_count: 0,
             max_depth,
             max_urls,
-            crawler_refs: Vec::new(),
-            current_crawler: 0,
-        }
-    }
-}
-
-impl Default for URLFrontierActor {
-    fn default() -> Self {
-        Self::new(3, 100)
-    }
-}
-
-impl URLFrontierActor {
-    pub fn add_seed_url(&mut self, url: String) {
-        if self.seen.insert(url.clone()) {
-            self.queue.push_back(CrawlUrl { url, depth: 0 });
-            info!("Added seed URL to frontier");
+            default_delay,
+            domains: HashMap::new(),
         }
     }
 
-    fn handle_crawl_request(&mut self) {
-        if self.crawled_count >= self.max_urls {
-            info!("Reached max URL limit ({}), stopping", self.max_urls);
-            return;
-        }
-        // Send next URL to a crawler if available
-        if let Some(crawl_url) = self.queue.pop_front()
-            && !self.crawler_refs.is_empty()
-        {
-            // Round-robin distribution to crawlers
-            let crawler = &self.crawler_refs[self.current_crawler];
-            self.current_crawler = (self.current_crawler + 1) % self.crawler_refs.len();
-
-            debug!(
-                "Sending URL to crawler: {} (depth: {})",
-                crawl_url.url, crawl_url.depth
+    fn domain_actor(
+        &mut self,
+        domain: &str,
+        ctx: &ActorContext<CrawlerMessage>,
+    ) -> Option<&ActorRef<CrawlerMessage>> {
+        if !self.domains.contains_key(domain) {
+            let actor = DomainActor::new(
+                domain.to_string(),
+                self.default_delay,
+                ctx.actor_ref().clone(),
             );
-
-            // TODO: How does the crawler knows where to send the response to?
-            if let Err(e) = crawler.tell(CrawlerMessage::CrawlUrl(crawl_url), None) {
-                tracing::error!("Failed to send URL to crawler: {}", e);
+            match ctx.spawn_child(domain, actor, None) {
+                Ok(actor_ref) => {
+                    info!("Spawned DomainActor for {}", domain);
+                    self.domains.insert(domain.to_string(), actor_ref);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to spawn DomainActor for {}: {}", domain, e);
+                    return None;
+                }
             }
         }
+        self.domains.get(domain)
     }
 
-    fn handle_page_result(&mut self, result: PageResult) {
-        self.crawled_count += 1;
+    fn route_url(&mut self, crawl_url: CrawlUrl, ctx: &ActorContext<CrawlerMessage>) {
+        let Some(domain) = extract_domain(&crawl_url.url) else {
+            debug!("Could not extract domain from {}", crawl_url.url);
+            return;
+        };
+        if let Some(actor_ref) = self.domain_actor(&domain, ctx)
+            && let Err(e) = actor_ref.tell(CrawlerMessage::CrawlUrl(crawl_url), None)
+        {
+            tracing::error!("Failed to route URL to DomainActor {}: {}", domain, e);
+        }
+    }
 
+    fn handle_page_result(&mut self, result: PageResult, ctx: &ActorContext<CrawlerMessage>) {
+        self.crawled_count += 1;
         info!(
-            "Crawled: {} (depth: {}) - Found {} links, {} chars text - Progress: {}/{}",
+            "Crawled: {} (depth: {}) — {} links, {} chars — {}/{}",
             result.url,
             result.depth,
             result.links.len(),
@@ -93,43 +80,39 @@ impl URLFrontierActor {
             self.max_urls
         );
 
-        // Add new URLs to queue if we haven't exceeded depth limit
-        if result.depth < self.max_depth {
-            let new_depth = result.depth + 1;
-            let mut added = 0;
-
-            for link in result.links {
-                // Basic URL normalization and deduplication
-                let normalized = link.trim().to_string();
-
-                if !normalized.is_empty()
-                    && (normalized.starts_with("http://") || normalized.starts_with("https://"))
-                    && self.seen.insert(normalized.clone())
-                {
-                    self.queue.push_back(CrawlUrl {
-                        url: normalized,
-                        depth: new_depth,
-                    });
-                    added += 1;
-                }
-            }
-
-            if added > 0 {
-                debug!("Added {} new URLs to frontier", added);
-            }
+        if self.crawled_count >= self.max_urls {
+            info!("Reached max URL limit ({}), stopping", self.max_urls);
+            return;
         }
 
-        // Keep crawling
-        self.handle_crawl_request();
+        if result.depth >= self.max_depth {
+            return;
+        }
+
+        let new_depth = result.depth + 1;
+        for link in result.links {
+            let normalized = link.trim().to_string();
+            if normalized.is_empty()
+                || (!normalized.starts_with("http://") && !normalized.starts_with("https://"))
+            {
+                continue;
+            }
+            if self.seen.insert(normalized.clone()) {
+                let crawl_url = CrawlUrl {
+                    url: normalized,
+                    depth: new_depth,
+                };
+                self.route_url(crawl_url, ctx);
+            }
+        }
     }
 
     fn handle_status_request(&self, ctx: &ActorContext<CrawlerMessage>) {
-        let status = FrontierStatus {
-            queued: self.queue.len(),
-            crawled: self.crawled_count,
-        };
-
         if ctx.is_ask_request() {
+            let status = FrontierStatus {
+                queued: self.queue.len(),
+                crawled: self.crawled_count,
+            };
             let ctx_clone = ctx.clone();
             tokio::spawn(async move {
                 let _ = ctx_clone
@@ -140,49 +123,46 @@ impl URLFrontierActor {
     }
 }
 
+impl Default for URLFrontierActor {
+    fn default() -> Self {
+        Self::new(3, 100, Duration::from_secs(1))
+    }
+}
+
 impl Actor for URLFrontierActor {
     type Msg = CrawlerMessage;
 
+    fn pre_start(&mut self, _ctx: &ActorContext<CrawlerMessage>) -> Result<(), ActorError> {
+        info!(
+            "URLFrontierActor started (max_depth: {}, max_urls: {}, default_delay: {:?})",
+            self.max_depth, self.max_urls, self.default_delay
+        );
+        Ok(())
+    }
+
     fn handle(&mut self, msg: CrawlerMessage, ctx: &ActorContext<CrawlerMessage>) {
         match msg {
-            CrawlerMessage::CrawlUrl(crawl_url) => {
-                // Re-add URL to queue (from external source)
-                if self.seen.insert(crawl_url.url.clone()) {
-                    self.queue.push_back(crawl_url);
-                }
-                self.handle_crawl_request();
+            CrawlerMessage::CrawlUrl(crawl_url) if self.seen.insert(crawl_url.url.clone()) => {
+                self.route_url(crawl_url, ctx);
             }
+            CrawlerMessage::CrawlUrl(_) => {}
             CrawlerMessage::PageResult(result) => {
-                self.handle_page_result(result);
+                self.handle_page_result(result, ctx);
             }
             CrawlerMessage::GetFrontierStatus(_) => {
                 self.handle_status_request(ctx);
             }
-            CrawlerMessage::FrontierStatus(_) => {
-                // Ignored by frontier
+            CrawlerMessage::DomainStopped(domain) => {
+                debug!("DomainActor stopped for {}", domain);
+                self.domains.remove(&domain);
             }
+            _ => {}
         }
-    }
-
-    fn pre_start(&mut self, ctx: &ActorContext<CrawlerMessage>) -> Result<(), ActorError> {
-        info!(
-            "URLFrontierActor started (max_depth: {}, max_urls: {})",
-            self.max_depth, self.max_urls
-        );
-        let frontier_ref = ctx.actor_ref().clone();
-        let client = Arc::new(reqwest::Client::new());
-        for i in 1..=2 {
-            let crawler = CrawlerActor::new(frontier_ref.clone(), client.clone());
-            let crawler_ref = ctx.spawn_child(&format!("crawler-{}", i), crawler, None)?;
-            self.crawler_refs.push(crawler_ref);
-            info!("Spawned crawler-{} as child", i);
-        }
-        Ok(())
     }
 
     fn post_stop(&mut self, _ctx: &ActorContext<CrawlerMessage>) -> Result<(), ActorError> {
         info!(
-            "URLFrontierActor stopped - Crawled {} URLs",
+            "URLFrontierActor stopped — crawled {} URLs",
             self.crawled_count
         );
         Ok(())
